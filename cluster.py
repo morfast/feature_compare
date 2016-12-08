@@ -28,7 +28,7 @@ def do_clustering(data):
     Z = scipy.cluster.hierarchy.linkage(dist_matrix, method='average')
     cluster = scipy.cluster.hierarchy.fcluster(Z, t=1.0)
     k = max(cluster)
-    print "result of hierarchy clustering:", k, "clusters"
+    #print "result of hierarchy clustering:", k, "clusters"
     
     #wdata = whiten(data)
     wdata = data
@@ -46,33 +46,94 @@ def distance(p1, p2):
     return math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
 
 def is_similar_cluster(clstr1, clstr2):
-    distance_threshold = 20
+    distance_threshold = 10
     ratio_threshold = 50
+    total_match_threshold = 2
 
     total_ratio1 = 0
     total_ratio2 = 0
-    for c1 in clstr1[:5]:
+    total_match = 0
+    match_index1 = set()
+    match_index2 = set()
+    for index1,c1 in enumerate(clstr1[:5]):
         centroid1, ratio1 = c1
-        for c2 in clstr2[:5]:
+        for index2,c2 in enumerate(clstr2[:5]):
             centroid2, ratio2 = c2
-            if distance(centroid1, centroid2) < distance_threshold:
-                total_ratio1 += ratio1
-                total_ratio2 += ratio2
+            if distance(centroid1, centroid2) <= distance_threshold:
+                match_index1.add(index1)
+                match_index2.add(index2)
+                total_match += 1
                 break
 
-    if total_ratio1 > ratio_threshold and total_ratio2 > ratio_threshold:
+    for i in match_index1:
+        total_ratio1 += clstr1[i][1]
+    for i in match_index2:
+        total_ratio2 += clstr2[i][1]
+
+    if total_ratio1 >= ratio_threshold and total_ratio2 >= ratio_threshold and total_match >= total_match_threshold:
         return True
     else:
         return False
 
-data1 = read_data(sys.argv[1])
-data2 = read_data(sys.argv[2])
-clstr1 = do_clustering(data1)
-clstr2 = do_clustering(data2)
+def read_frigate_log(logfilename):
+    res = {}
+    for line in open(logfilename):
+        spline = line.strip().split()
+        up = spline[7]
+        down = spline[8]
+        ipport = spline[5]
+        ip = ipport.split(':')[0]
 
-print clstr1
-print clstr2
+        if ip in res.keys():
+            res[ip].append([float(up), float(down)])
+        else:
+            res[ip] = [[float(up), float(down)],]
 
-print is_similar_cluster(clstr1, clstr2)
+    return res
 
+def test():
+    data1 = read_data(sys.argv[1])
+    data2 = read_data(sys.argv[2])
+    clstr1 = do_clustering(data1)
+    clstr2 = do_clustering(data2)
+    
+    print clstr1
+    print clstr2
+    
+    print is_similar_cluster(clstr1, clstr2)
 
+def main():
+    print "Reading known probes logs ..."
+    probe_datas = read_frigate_log(sys.argv[1])
+    probe_clstrs = []
+    for ip in probe_datas:
+        if len(probe_datas[ip]) <= 10: continue
+        print "Clustering probe IP:", ip
+        probe_clstr = do_clustering(probe_datas[ip])
+        probe_clstrs.append(probe_clstr)
+        #print probe_clstr
+        #print
+    print "Done"
+    
+    print "Reading frigate logs...",
+    fres = read_frigate_log(sys.argv[2])
+    print "Done"
+    
+    for ip in fres.keys():
+        data = fres[ip]
+        if len(data) < 3 or len(data) > 10000:
+            #print ip, "skip"
+            continue
+        cmp_clstr = do_clustering(fres[ip])
+        if len(cmp_clstr) < 3: continue
+        for probe_clstr in probe_clstrs:
+            if is_similar_cluster(probe_clstr, cmp_clstr):
+                print 'P:', probe_clstr
+                print 'C:', cmp_clstr
+                print ip, "dangerous"
+                print
+                break
+        #else:
+        #    print ip, "safe"
+
+main()
