@@ -45,8 +45,19 @@ def do_clustering(data):
 def distance(p1, p2):
     return math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
 
+def close_enough(p1, p2):
+    distance_threshold = 20
+    if p1[0] == 0.0 and p2[0] != 0.0  or p1[0] != 0.0 and p2[0] == 0.0:
+        return False
+    if p1[1] == 0.0 and p2[1] != 0.0  or p1[1] != 0.0 and p2[1] == 0.0:
+        return False
+    if distance(p1, p2) <= distance_threshold:
+        return True
+    else:
+        return False
+    
+
 def is_similar_cluster(clstr1, clstr2):
-    distance_threshold = 10
     ratio_threshold = 50
     total_match_threshold = 2
 
@@ -55,11 +66,11 @@ def is_similar_cluster(clstr1, clstr2):
     total_match = 0
     match_index1 = set()
     match_index2 = set()
-    for index1,c1 in enumerate(clstr1[:5]):
+    for index1,c1 in enumerate(clstr1[:10]):
         centroid1, ratio1 = c1
-        for index2,c2 in enumerate(clstr2[:5]):
+        for index2,c2 in enumerate(clstr2[:10]):
             centroid2, ratio2 = c2
-            if distance(centroid1, centroid2) <= distance_threshold:
+            if close_enough(centroid1, centroid2):
                 match_index1.add(index1)
                 match_index2.add(index2)
                 total_match += 1
@@ -75,19 +86,28 @@ def is_similar_cluster(clstr1, clstr2):
     else:
         return False
 
-def read_frigate_log(logfilename):
+def read_frigate_log(logfilenames):
     res = {}
-    for line in open(logfilename):
-        spline = line.strip().split()
-        up = spline[7]
-        down = spline[8]
-        ipport = spline[5]
-        ip = ipport.split(':')[0]
+    total_lines = 0
+    for logfilename in logfilenames:
+        for line in open(logfilename):
+            spline = line.strip().split()
+            up = spline[7]
+            down = spline[8]
+            ipport = spline[5]
+            ip = ipport.split(':')[0]
 
-        if ip in res.keys():
-            res[ip].append([float(up), float(down)])
-        else:
-            res[ip] = [[float(up), float(down)],]
+            if ip in res.keys():
+                res[ip].append([float(up), float(down)])
+            else:
+                res[ip] = [[float(up), float(down)],]
+            total_lines += 1
+            if total_lines % 10000 == 0:
+                sys.stderr.write("%d lines read\n" % total_lines);
+
+    for ip in res.keys():
+        if any([i[1] for i in res[ip]]) == False:
+            res.pop(ip)
 
     return res
 
@@ -104,20 +124,21 @@ def test():
 
 def main():
     print "Reading known probes logs ..."
-    probe_datas = read_frigate_log(sys.argv[1])
+    probe_datas = read_frigate_log(sys.argv[1:2])
     probe_clstrs = []
     for ip in probe_datas:
+        print ip, len(probe_datas[ip])
         if len(probe_datas[ip]) <= 10: continue
         print "Clustering probe IP:", ip
         probe_clstr = do_clustering(probe_datas[ip])
         probe_clstrs.append(probe_clstr)
-        #print probe_clstr
-        #print
+        print "[P]:", probe_clstr
+        print
     print "Done"
     
-    print "Reading frigate logs...",
-    fres = read_frigate_log(sys.argv[2])
-    print "Done"
+    sys.stderr.write("Reading frigate logs...\n")
+    fres = read_frigate_log(sys.argv[2:])
+    sys.stderr.write("Done\n")
     
     for ip in fres.keys():
         data = fres[ip]
