@@ -227,13 +227,18 @@ def write_input_file(fres):
 def main():
     probe_clstrs = scan_probes(sys.argv[1:2])
     
-    print "Reading frigate logs..."
-    fres = read_frigate_log(sys.argv[2:])
-    inputfilename = write_input_file(fres)
-    print "Done"
+    try:
+        print "Reading frigate logs..."
+        fres = read_frigate_log(sys.argv[2:])
+        inputfilename = write_input_file(fres)
+        inputfilenames = [inputfilename, ]
+        print "Done"
+    except:
+        inputfilenames = sys.argv[2:]
     
     print "Comparing ..."
-    go_process(inputfilename, probe_clstrs)
+    for inputfilename in inputfilenames:
+        go_process(inputfilename, probe_clstrs)
 
 def main2():
     print "Reading known probes logs ..."
