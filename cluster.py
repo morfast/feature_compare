@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python -u
 
 import scipy.cluster
 import sys
@@ -58,7 +58,7 @@ def close_enough(p1, p2):
     
 
 def is_similar_cluster(clstr1, clstr2):
-    ratio_threshold = 50
+    ratio_threshold = 30
     total_match_threshold = 2
 
     total_ratio1 = 0
@@ -82,10 +82,28 @@ def is_similar_cluster(clstr1, clstr2):
         total_ratio2 += clstr2[i][1]
 
     if total_ratio1 >= ratio_threshold and total_ratio2 >= ratio_threshold and total_match >= total_match_threshold:
+        print " ============ similar clusters found ================"
+        print_cluster(clstr1)
+        print " ============ ====================== ================"
+        print_cluster(clstr2)
+        print " ============ ====================== ================"
+        print match_index1
+        print match_index2
+        print " ============ ====================== ================"
         return True
     else:
         return False
 
+def print_cluster(clstr):
+    for i, c in enumerate(clstr):
+        centroid, ratio = c
+        x,y = centroid
+        print "(%9.2f, %9.2f) %4.1f" % (x, y, ratio),
+        if (i+1) % 5 == 0:
+            print
+    if (i+1) % 5 != 0:
+        print
+    
 def read_frigate_log(logfilenames):
     res = {}
     total_lines = 0
@@ -103,7 +121,7 @@ def read_frigate_log(logfilenames):
                 res[ip] = [[float(up), float(down)],]
             total_lines += 1
             if total_lines % 10000 == 0:
-                sys.stderr.write("%d lines read\n" % total_lines);
+                print "%d lines read" % total_lines;
 
     for ip in res.keys():
         if any([i[1] for i in res[ip]]) == False:
@@ -111,35 +129,40 @@ def read_frigate_log(logfilenames):
 
     return res
 
-def test():
-    data1 = read_data(sys.argv[1])
-    data2 = read_data(sys.argv[2])
-    clstr1 = do_clustering(data1)
-    clstr2 = do_clustering(data2)
-    
-    print clstr1
-    print clstr2
-    
-    print is_similar_cluster(clstr1, clstr2)
+def read_up_down_log(logfilename):
+    # 1.2.3.4   11,22  33,44  55,66
+    # 1.2.3.5   77,88  99,10
+    # ... 
+    for line in open(logfilename):
+        spline = line.split()
+        ip = spline[0]
+        cs = []
+        for c in spline[1:]:
+            cs.append(c.split(','))
+
 
 def main():
     print "Reading known probes logs ..."
     probe_datas = read_frigate_log(sys.argv[1:2])
     probe_clstrs = []
+    clustering_log_num_threshold = 10
     for ip in probe_datas:
-        print ip, len(probe_datas[ip])
-        if len(probe_datas[ip]) <= 10: continue
-        print "Clustering probe IP:", ip
-        probe_clstr = do_clustering(probe_datas[ip])
-        probe_clstrs.append(probe_clstr)
-        print "[P]:", probe_clstr
-        print
+        if len(probe_datas[ip]) <= clustering_log_num_threshold: 
+            print "skip IP: %s (has less than %d logs)" % (ip, clustering_log_num_threshold)
+            continue
+        else:
+            print "Clustering known probe IP: %s ..." % (ip),
+            probe_clstr = do_clustering(probe_datas[ip])
+            probe_clstrs.append(probe_clstr)
+            print "OK"
+            print_cluster(probe_clstr)
     print "Done"
     
-    sys.stderr.write("Reading frigate logs...\n")
+    print "Reading frigate logs..."
     fres = read_frigate_log(sys.argv[2:])
-    sys.stderr.write("Done\n")
+    print "Done"
     
+    print "Comparing ..."
     for ip in fres.keys():
         data = fres[ip]
         if len(data) < 3 or len(data) > 10000:
@@ -149,10 +172,9 @@ def main():
         if len(cmp_clstr) < 3: continue
         for probe_clstr in probe_clstrs:
             if is_similar_cluster(probe_clstr, cmp_clstr):
-                print 'P:', probe_clstr
-                print 'C:', cmp_clstr
-                print ip, "dangerous"
-                print
+                #print 'P:', probe_clstr
+                #print 'C:', cmp_clstr
+                print "Suspicious IP: ", ip
                 break
         #else:
         #    print ip, "safe"
