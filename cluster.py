@@ -4,13 +4,8 @@ import scipy.cluster
 import sys
 import math
 import multiprocessing
+import argparse
 from scipy.cluster.vq import vq,kmeans,whiten
-
-def read_data(filename):
-    res = []
-    for line in open(filename).readlines():
-        res.append([float(i) for i in line.strip().split()])
-    return res
 
 def count_elem(lst):
     res = {}
@@ -21,7 +16,6 @@ def count_elem(lst):
             res[elem] = 1
     return res
 
-
 def do_clustering(data):
     
     # hierarchical clustering
@@ -31,12 +25,26 @@ def do_clustering(data):
     k = max(cluster)
     #print "result of hierarchy clustering:", k, "clusters"
     
+    #print data
+    #print wdata
     #wdata = whiten(data)
     wdata = data
     cr = scipy.cluster.vq.kmeans(wdata, k)[0]
+    # cr is the centroid of the clusters
+    #print "cr"
+    #print cr
     #print cr[0]
+
+    # assign each point to the nearest cluster
     label = vq(wdata, cr)
+    #print "label"
+    #print label[0]
+
+    # count the ratio of each cluster
     ct = count_elem(list(label[0]))
+    #print "ct"
+    #print ct
+
     res = []
     for key in ct:
         res.append([(cr[key][0], cr[key][1]), ct[key]/float(len(data))*100])
@@ -47,7 +55,7 @@ def distance(p1, p2):
     return math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
 
 def close_enough(p1, p2):
-    distance_threshold = 20
+    distance_threshold = 25
     if p1[0] == 0.0 and p2[0] != 0.0  or p1[0] != 0.0 and p2[0] == 0.0:
         return False
     if p1[1] == 0.0 and p2[1] != 0.0  or p1[1] != 0.0 and p2[1] == 0.0:
@@ -59,7 +67,7 @@ def close_enough(p1, p2):
     
 
 def is_similar_cluster(clstr1, clstr2):
-    ratio_threshold = 30
+    ratio_threshold = 35
     total_match_threshold = 2
 
     total_ratio1 = 0
@@ -85,12 +93,12 @@ def is_similar_cluster(clstr1, clstr2):
     if total_ratio1 >= ratio_threshold and total_ratio2 >= ratio_threshold and total_match >= total_match_threshold:
         print " ============ similar clusters found ================"
         print_cluster(clstr1)
-        print " ============ ====================== ================"
+        print " ===================================================="
         print_cluster(clstr2)
-        print " ============ ====================== ================"
+        print " ===================================================="
         print match_index1
         print match_index2
-        print " ============ ====================== ================"
+        print " ===================================================="
         return True
     else:
         return False
@@ -122,7 +130,7 @@ def read_frigate_log(logfilenames):
                 res[ip] = [[float(up), float(down)],]
             total_lines += 1
             if total_lines % 10000 == 0:
-                print "%d lines read" % total_lines;
+                print "%d lines read" % total_lines
 
     for ip in res.keys():
         if any([i[1] for i in res[ip]]) == False:
@@ -172,9 +180,8 @@ def get_lines(f, n):
     return res, eof
 
 def go_process(inputfilename, probe_clstrs):
-    #n_process = multiprocessing.cpu_count()
-    n_process = 2
-    n_lines_per_process = 3000
+    n_process = multiprocessing.cpu_count()
+    n_lines_per_process = 10000
     f = open(inputfilename)
     total = 0
 
@@ -195,21 +202,24 @@ def go_process(inputfilename, probe_clstrs):
         if eof: break
 
 def scan_probes(filenames):
-    print "Reading known probes logs ..."
-    probe_datas = read_frigate_log(filenames)
     probe_clstrs = []
-    clustering_log_num_threshold = 10
-    for ip in probe_datas:
-        if len(probe_datas[ip]) <= clustering_log_num_threshold: 
-            print "skip IP: %s (has less than %d logs)" % (ip, clustering_log_num_threshold)
-            continue
-        else:
-            print "Clustering known probe IP: %s ..." % (ip),
-            probe_clstr = do_clustering(probe_datas[ip])
-            probe_clstrs.append(probe_clstr)
-            print "OK"
-            print_cluster(probe_clstr)
-    print "Done"
+    for filename in filenames:
+        print "Reading known probes logs from", filename
+        probe_datas = read_frigate_log([filename])
+        clustering_log_num_threshold = 10
+        clusters_per_probe_ip = 3
+        for ip in probe_datas:
+            if len(probe_datas[ip]) <= clustering_log_num_threshold: 
+                print "skip IP: %s (has less than %d logs)" % (ip, clustering_log_num_threshold)
+                continue
+            else:
+                print "Clustering known probe IP: %s ..." % (ip),
+                for i in range(clusters_per_probe_ip):
+                    probe_clstr = do_clustering(probe_datas[ip])
+                    probe_clstrs.append(probe_clstr)
+                print "OK"
+                print_cluster(probe_clstr)
+        print "Done"
     return probe_clstrs
 
 def write_input_file(fres):
@@ -224,58 +234,41 @@ def write_input_file(fres):
     f.close()
     return filename
 
+def parse_arguments():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-p", "--probe", action='store', nargs='*')
+    parser.add_argument("-d", "--data", action='store', nargs='*')
+    a = parser.parse_args()
+    return a.probe, a.data
+
 def main():
-    probe_clstrs = scan_probes(sys.argv[1:2])
+    probe_filenames, data_filenames = parse_arguments()
+    if not probe_filenames or not data_filenames:
+        sys.exit(0)
+    probe_clstrs = scan_probes(probe_filenames)
     
     try:
         print "Reading frigate logs..."
-        fres = read_frigate_log(sys.argv[2:])
+        fres = read_frigate_log(data_filenames)
         inputfilename = write_input_file(fres)
         inputfilenames = [inputfilename, ]
         print "Done"
     except:
-        inputfilenames = sys.argv[2:]
+        inputfilenames = data_filenames
     
-    print "Comparing ..."
     for inputfilename in inputfilenames:
+        print "Comparing %s ..." % inputfilename
         go_process(inputfilename, probe_clstrs)
 
-def main2():
-    print "Reading known probes logs ..."
-    probe_datas = read_frigate_log(sys.argv[1:2])
-    probe_clstrs = []
-    clustering_log_num_threshold = 10
-    for ip in probe_datas:
-        if len(probe_datas[ip]) <= clustering_log_num_threshold: 
-            print "skip IP: %s (has less than %d logs)" % (ip, clustering_log_num_threshold)
-            continue
-        else:
-            print "Clustering known probe IP: %s ..." % (ip),
-            probe_clstr = do_clustering(probe_datas[ip])
-            probe_clstrs.append(probe_clstr)
-            print "OK"
-            print_cluster(probe_clstr)
-    print "Done"
-    
-    print "Reading frigate logs..."
-    fres = read_frigate_log(sys.argv[2:])
-    print "Done"
-    
-    print "Comparing ..."
-    for ip in fres.keys():
-        data = fres[ip]
-        if len(data) < 3 or len(data) > 10000:
-            #print ip, "skip"
-            continue
-        cmp_clstr = do_clustering(fres[ip])
-        if len(cmp_clstr) < 3: continue
-        for probe_clstr in probe_clstrs:
-            if is_similar_cluster(probe_clstr, cmp_clstr):
-                #print 'P:', probe_clstr
-                #print 'C:', cmp_clstr
-                print "Suspicious IP: ", ip
-                break
-        #else:
-        #    print ip, "safe"
+
+
+def test():
+    for line in open(sys.argv[1]):
+        ip, data = parse_line(line)
+        if len(data) < 5: continue
+        #print ip
+        #print_cluster(do_clustering(data))
+        do_clustering(data)
+
 
 main()
