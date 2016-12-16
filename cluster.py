@@ -139,6 +139,23 @@ def read_frigate_log(logfilenames):
     return res
 
 def parse_line(line):
+    # 1.2.3.4   11,22*1  33,44  55,66
+    # 1.2.3.5   77,88  99,10*2
+    # ... 
+    spline = line.split()
+    ip = spline[0]
+    cs = []
+    for c in spline[1:]:
+        if '*' in c:
+            point, times = c.split('*')
+        else:
+            point = c
+            times = 1
+        for i in range(int(times)):
+            cs.append([float(i) for i in point.split(',')][::-1])
+    return ip, cs
+
+def parse_line_ori(line):
     # 1.2.3.4   11,22  33,44  55,66
     # 1.2.3.5   77,88  99,10
     # ... 
