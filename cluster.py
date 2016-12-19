@@ -55,7 +55,7 @@ def distance(p1, p2):
     return math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
 
 def close_enough(p1, p2):
-    distance_threshold = 25
+    distance_threshold = 15
     if p1[0] == 0.0 and p2[0] != 0.0  or p1[0] != 0.0 and p2[0] == 0.0:
         return False
     if p1[1] == 0.0 and p2[1] != 0.0  or p1[1] != 0.0 and p2[1] == 0.0:
@@ -67,7 +67,7 @@ def close_enough(p1, p2):
     
 
 def is_similar_cluster(clstr1, clstr2):
-    ratio_threshold = 35
+    ratio_threshold = 50
     total_match_threshold = 2
 
     total_ratio1 = 0
@@ -99,9 +99,9 @@ def is_similar_cluster(clstr1, clstr2):
         print match_index1
         print match_index2
         print " ===================================================="
-        return True
+        return total_match, total_ratio1, total_ratio2
     else:
-        return False
+        return 0, 0, 0
 
 def print_cluster(clstr):
     for i, c in enumerate(clstr):
@@ -166,22 +166,39 @@ def parse_line_ori(line):
         cs.append([float(i) for i in c.split(',')])
     return ip, cs
 
-def compare_cluster(lines, thread_i, probe_clstrs):
+def pre_filter(data):
+    """ kick out unreasonable data before comparing clusters """
+    # pv too small or too large
+    if len(data) < 5 or len(data) > 10000:
+        return True
+
+    # too large traffic
+    if max(max(data)) > 5000.0:
+        return True
+
+    # no inbound traffic
+    inbound = [a[1] for a in data]
+    if any(inbound) == False:
+        return True
+
+def compare_cluster(lines, thread_i, probe_clstrs, result_file):
     for line in lines:
         ip_addr, data = parse_line(line)
         if not ip_addr:
             continue
 
         # few logs, or too many logs, skip
-        if len(data) < 5 or len(data) > 10000:
+        if pre_filter(data):
             continue
+
         cmp_clstr = do_clustering(data)
         if len(cmp_clstr) < 3: continue
         for probe_clstr in probe_clstrs:
-            if is_similar_cluster(probe_clstr, cmp_clstr):
-                #print 'P:', probe_clstr
-                #print 'C:', cmp_clstr
-                print "Suspicious IP: ", ip_addr
+            match, ratio1, ratio2 =  is_similar_cluster(probe_clstr, cmp_clstr)
+            if match:
+                print "Suspicious IP: %s %d %4.2f %4.2f" % (ip_addr, match, ratio1, ratio2)
+                result_file.write("%s %d %4.2f %4.2f\n" % (ip_addr, match, ratio1, ratio2))
+                result_file.flush()
                 break
 
 def get_lines(f, n):
@@ -200,13 +217,14 @@ def go_process(inputfilename, probe_clstrs):
     n_process = multiprocessing.cpu_count()
     n_lines_per_process = 10000
     f = open(inputfilename)
+    result_file = open("%s_result.txt" % (inputfilename), "w")
     total = 0
 
     while True:
         process_list = []
         for process_i in range(n_process):
             lines, eof = get_lines(f, n_lines_per_process)
-            p = multiprocessing.Process(target = compare_cluster, args=(lines, process_i, probe_clstrs))
+            p = multiprocessing.Process(target = compare_cluster, args=(lines, process_i, probe_clstrs, result_file))
             process_list.append(p)
             p.start()
             if eof: break
@@ -217,6 +235,8 @@ def go_process(inputfilename, probe_clstrs):
         print "%d IP scanned" % total
 
         if eof: break
+
+    result_file.close()
 
 def scan_probes(filenames):
     probe_clstrs = []
